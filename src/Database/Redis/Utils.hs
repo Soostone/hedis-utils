@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Database.Redis.Utils
@@ -27,6 +28,8 @@ import           Control.Retry
 import           Data.ByteString.Char8  (ByteString)
 import qualified Data.ByteString.Char8  as B
 import           Data.Default
+import           Data.Maybe
+import           Data.Serialize
 import           Data.Time.Clock.POSIX
 import           Database.Redis         hiding (decode)
 import qualified Database.Redis         as R
@@ -94,6 +97,10 @@ unexpected r = error $ "Received an unexpected Left response from Redis. Reply: 
 -- | Block until lock can be acquired. Will try locking for up to 8
 -- times, with a base delay of 25 miliseconds. Exponential backoff
 -- from there.
+--
+-- This function implements a solid locking mechanism using the
+-- algorithm described in one of the redis.io comments. It uses getset
+-- underneath via 'acquireLock'.
 blockLock
     :: RetrySettings
     -- ^ Retry settings for while trying to acquire the lock. As an
@@ -111,7 +118,9 @@ blockLock set lock to nm = retrying set id $ acquireLock lock to nm
 
 
 -------------------------------------------------------------------------------
--- | Try to acquire lock in a given namespace. Immediately returns the result.
+-- | Try to acquire lock in a given namespace. Immediately returns the
+-- result, so you need to keep trying. Use 'blockLock' instead for a
+-- higher level wrapper.
 acquireLock
     :: B.ByteString
     -- ^ namespace for this lock
@@ -189,3 +198,37 @@ mkTimeOut to = (B.pack . show . (to +)) `liftM` liftIO getTime
 
 getTime :: IO Double
 getTime = realToFrac `fmap` getPOSIXTime
+
+
+
+                                 ------------
+                                 -- Queues --
+                                 ------------
+
+
+------------------------------------------------------------------------------
+-- | Push item into a FIFO buffer
+pushFIFO :: (Serialize a) => ByteString -> a -> Redis ()
+pushFIFO k x = do
+  !_ <- expect $ lpush k [encode x]
+  return ()
+
+
+------------------------------------------------------------------------------
+-- | Collect redis list into Haskell list, popping elements one at a time up to
+-- n elements
+--
+-- This should be atomic, but other processes may take items out of the same
+-- buffer in an interleaved fashion.
+popFIFO :: (Serialize a) => ByteString -> Int -> Redis [a]
+popFIFO k n = do
+  res <- replicateM n $ rpop k
+  case sequence res of
+    Left r -> unexpected r
+    Right xs -> return $ mapMaybe conv $ catMaybes xs
+  where
+    conv x = case decode x of
+               Left _ -> Nothing
+               Right x' -> Just x'
+
+
