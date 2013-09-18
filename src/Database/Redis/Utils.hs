@@ -17,6 +17,10 @@ module Database.Redis.Utils
     , mkLockName
     , mkTimeOut
 
+    -- * FIFO Queue Operations
+    , pushFIFO
+    , popFIFO
+
     ) where
 
 
