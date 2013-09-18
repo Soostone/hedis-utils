@@ -23,6 +23,6 @@ getRedisConfig c = do
     n <- C.lookupDefault 3 c "max-conn"
     to <- fromIntegral <$> C.lookupDefault (15 :: Int) c "timeout"
     return $ H.defaultConnectInfo { H.connectHost = host
-                                , H.connectPort = port
-                                , H.connectMaxConnections = n
-                                , H.connectMaxIdleTime = to }
+                                  , H.connectPort = port
+                                  , H.connectMaxConnections = n
+                                  , H.connectMaxIdleTime = to }
