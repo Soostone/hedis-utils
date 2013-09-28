@@ -33,7 +33,7 @@ import           Data.ByteString.Char8  (ByteString)
 import qualified Data.ByteString.Char8  as B
 import           Data.Default
 import           Data.Maybe
-import           Data.Serialize
+import           Data.Serialize         as S
 import           Data.Time.Clock.POSIX
 import           Database.Redis         hiding (decode)
 import qualified Database.Redis         as R
@@ -214,7 +214,7 @@ getTime = realToFrac `fmap` getPOSIXTime
 -- | Push item into a FIFO buffer
 pushFIFO :: (Serialize a) => ByteString -> a -> Redis ()
 pushFIFO k x = do
-  !_ <- expect $ lpush k [encode x]
+  !_ <- expect $ lpush k [S.encode x]
   return ()
 
 
@@ -229,10 +229,10 @@ popFIFO k n = do
   res <- replicateM n $ rpop k
   case sequence res of
     Left r -> unexpected r
-    Right xs -> return $ mapMaybe conv $ catMaybes xs
+    Right xs -> return $ map conv . catMaybes $ xs
   where
-    conv x = case decode x of
-               Left _ -> Nothing
-               Right x' -> Just x'
+    conv x = case S.decode x of
+               Left e -> error $ "Serialize.decode conversion failed: " ++ e
+               Right x' -> x'
 
 
