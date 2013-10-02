@@ -184,8 +184,8 @@ releaseLock
     -- ^ namespace for this lock
     -> B.ByteString
     -- ^ Name of item to release
-    -> Redis Integer
-releaseLock lock nm = expect $ del [nm']
+    -> Redis ()
+releaseLock lock nm = expect (del [nm']) >> return ()
     where
       nm' = mkLockName lock nm
 
