@@ -25,6 +25,7 @@ module Database.Redis.Utils
 
 
 -------------------------------------------------------------------------------
+import           Control.Error
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -86,6 +87,24 @@ expect f = do
 -- | Raise the unexpected exception
 unexpected :: Show a => a -> t
 unexpected r = error $ "Received an unexpected Left response from Redis. Reply: " ++ show r
+
+
+
+-------------------------------------------------------------------------------
+-- | Lift the annoying Redis (Either Reply) return type into an 'EitherT'.
+redisT :: (Functor m, Show e) => m (Either e b) -> EitherT String m b
+redisT f = bimapEitherT show id (EitherT f)
+
+
+-------------------------------------------------------------------------------
+-- | Lift the even more annyong Redis (Either Reply (Maybe a)) type
+-- into an EitherT.
+maybeRedisT :: (Monad m, Functor m, Show e) => m (Either e (Maybe b)) -> EitherT String m b
+maybeRedisT f = do
+    res <- redisT f
+    case res of
+      Nothing -> left "redis returned no object (Nothing)"
+      Just x -> return x
 
 
 
