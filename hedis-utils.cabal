@@ -24,7 +24,7 @@ library
   build-depends:       
       base >=4.6 && <4.7
     , hedis >=0.6 && <0.7
-    , retry
+    , retry >= 0.4
     , data-default
     , configurator
     , network
