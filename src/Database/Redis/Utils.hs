@@ -67,7 +67,7 @@ retryRedis max msg c f = go `catch` handle
     handle e = error . concat $
            [ "Hedis: Retried ", show max, " times but failed. Error: "
            , show e, ". Message: ", msg ]
-    go = recoverAll (def { numRetries = limitedRetries max }) $ runRedis c f
+    go = recoverAll (def <> limitRetries max) $ runRedis c f
 
 
 
@@ -125,7 +125,7 @@ maybeRedisT f = do
 -- algorithm described in one of the redis.io comments. It uses getset
 -- underneath via 'acquireLock'.
 blockLock
-    :: RetrySettings
+    :: RetryPolicy
     -- ^ Retry settings for while trying to acquire the lock. As an
     -- example, a 25 milisecond base with 10 exp backoff retries would
     -- work up to a 25 second retry.
@@ -136,7 +136,7 @@ blockLock
     -> B.ByteString
     -- ^ Name of item to lock.
     -> Redis Bool
-blockLock set lock to nm = retrying set id $ acquireLock lock to nm
+blockLock set lock to nm = retrying set (const return) $ acquireLock lock to nm
 
 
 
