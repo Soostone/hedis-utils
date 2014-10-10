@@ -1,5 +1,5 @@
 name:                hedis-utils
-version:             0.2.1
+version:             0.3.0
 synopsis:            Collection of utilities for working with Redis in Haskell
 license:             BSD3
 license-file:        LICENSE
@@ -12,13 +12,13 @@ extra-source-files:  README.md
 cabal-version:       >=1.10
 
 library
-  exposed-modules:     
+  exposed-modules:
     Database.Redis.Utils
     Database.Redis.Configurator
     Database.Redis.Yaml
 
   other-extensions:    RankNTypes, ScopedTypeVariables
-  build-depends:       
+  build-depends:
       base            >=4.6 && <4.7
     , bytestring
     , cereal

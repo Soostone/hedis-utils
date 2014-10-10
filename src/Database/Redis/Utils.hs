@@ -5,7 +5,7 @@ module Database.Redis.Utils
     (
 
      -- * General Utilities
-      expect
+      unwrap
     , unexpected
     , retryRedis
     , runRedis'
@@ -75,8 +75,8 @@ retryRedis max msg c f = go `catch` handle
 -------------------------------------------------------------------------------
 -- | Unwrap just enough to know if there was an exception. Expect that
 -- there isn't one, getting rid of Either return type from hedis.
-expect :: (Monad m, Show a) => m (Either a b) -> m b
-expect f = do
+unwrap :: (Monad m, Show a) => m (Either a b) -> m b
+unwrap f = do
   res <- f
   case res of
     Left e -> unexpected e
@@ -154,11 +154,11 @@ acquireLock
     -> Redis Bool
 acquireLock lock to nm = do
     tm <- mkTimeOut to
-    res <- expect $ setnx nm' tm
+    res <- unwrap $ setnx nm' tm
     case res of
       True -> return True
       False -> do
-          curLock <- expect $ R.get nm'
+          curLock <- unwrap $ R.get nm'
           case curLock of
             -- someone else unlocked it, retry the process
             Nothing -> acquireLock lock to nm
@@ -180,7 +180,7 @@ acquireLock lock to nm = do
       -- old/expired/garbled value in the lock. Prevents race
       -- conditions.
       getsetMech now = do
-          e <- expect $ getset nm' (B.pack . show $ now + to)
+          e <- unwrap $ getset nm' (B.pack . show $ now + to)
           case e of
             -- no old value in there, shouldn't happen in practice
             Nothing -> return True
@@ -204,7 +204,7 @@ releaseLock
     -> B.ByteString
     -- ^ Name of item to release
     -> Redis ()
-releaseLock lock nm = expect (del [nm']) >> return ()
+releaseLock lock nm = unwrap (del [nm']) >> return ()
     where
       nm' = mkLockName lock nm
 
@@ -233,7 +233,7 @@ getTime = realToFrac `fmap` getPOSIXTime
 -- | Push item into a FIFO buffer
 pushFIFO :: (Serialize a) => ByteString -> a -> Redis ()
 pushFIFO k x = do
-  !_ <- expect $ lpush k [S.encode x]
+  !_ <- unwrap $ lpush k [S.encode x]
   return ()
 
 
