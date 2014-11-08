@@ -8,7 +8,7 @@ module Database.Redis.Utils
       unwrap
     , unexpected
     , retryRedis
-    , runRedis'
+    , runRedisSimple
 
      -- * Locking
     , blockLock
@@ -45,8 +45,8 @@ import           Safe
 
 -------------------------------------------------------------------------------
 -- | Short-hand for running redis and retrying a few times.
-runRedis' :: Connection -> Redis a -> IO a
-runRedis' = retryRedis 3 "Generic retryRedis"
+runRedisSimple :: Connection -> Redis a -> IO a
+runRedisSimple = retryRedis 3 "Generic retryRedis"
 
 
 -------------------------------------------------------------------------------
