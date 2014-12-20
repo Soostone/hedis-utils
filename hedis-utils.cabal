@@ -19,7 +19,7 @@ library
 
   other-extensions:    RankNTypes, ScopedTypeVariables
   build-depends:
-      base            >=4.6 && <4.7
+      base            >=4.6 && <4.8
     , bytestring
     , cereal
     , configurator
@@ -32,5 +32,32 @@ library
     , time
     , transformers
     , yaml
+
+    -- temporary dep to get cabal compliant
+    , either > 4.3 && < 5
+
   hs-source-dirs:      src
+  default-language:    Haskell2010
+
+
+test-suite test
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  build-depends:
+      hedis-utils
+    , HUnit
+    , QuickCheck
+    , base
+    , bytestring
+    , containers
+    , derive
+    , test-framework
+    , test-framework-smallcheck
+    , hedis
+    , data-default
+    , retry
+    , smallcheck
+    , cereal
+
   default-language:    Haskell2010

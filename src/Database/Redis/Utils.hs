@@ -136,7 +136,7 @@ blockLock
     -> B.ByteString
     -- ^ Name of item to lock.
     -> Redis Bool
-blockLock set lock to nm = retrying set (const return) $ acquireLock lock to nm
+blockLock set lock to nm = retrying set (const $ return . not) $ acquireLock lock to nm
 
 
 
@@ -199,7 +199,7 @@ acquireLock lock to nm = do
 -------------------------------------------------------------------------------
 -- | Release a lock
 releaseLock
-    ::  B.ByteString
+    :: B.ByteString
     -- ^ namespace for this lock
     -> B.ByteString
     -- ^ Name of item to release
