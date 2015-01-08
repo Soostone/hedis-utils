@@ -17,6 +17,12 @@ module Database.Redis.Utils
     , mkLockName
     , mkTimeOut
 
+     -- * Renewable Locks
+    , blockRenewableLock
+    , acquireRenewableLock
+    , renewRenewableLock
+    , releaseRenewableLock
+
     -- * FIFO Queue Operations
     , pushFIFO
     , popFIFO
@@ -207,6 +213,84 @@ releaseLock
 releaseLock lock nm = unwrap (del [nm']) >> return ()
     where
       nm' = mkLockName lock nm
+
+
+                            ---------------------
+                            -- Renewable Locks --
+                            ---------------------
+
+
+bracketRenewable
+    :: B.ByteString
+    -- ^ namespace for this lock
+    -> B.ByteString
+    -- ^ Name to lock
+    -> Redis a
+    -- ^ action to bracket
+    -> Redis a
+bracketRenewable lock nm action = do
+    acquireLock lock 5 (nm<>"_lock")
+    res <- action
+    releaseLock lock nm
+    return res
+
+
+-------------------------------------------------------------------------------
+-- | Like blockLock, but for renewable locks.
+blockRenewableLock
+    :: RetryPolicy
+    -- ^ Retry settings for while trying to acquire the lock. As an
+    -- example, a 25 milisecond base with 10 exp backoff retries would
+    -- work up to a 25 second retry.
+    -> B.ByteString
+    -- ^ namespace for this lock
+    -> Double
+    -- ^ timeout in seconds.
+    -> B.ByteString
+    -- ^ Name of item to lock.
+    -> Redis Bool
+blockRenewableLock set lock to nm =
+    retrying set (const $ return . not) $ acquireRenewableLock lock to nm
+
+
+-------------------------------------------------------------------------------
+-- | Like acquireLock, but for renewable locks.
+acquireRenewableLock
+    :: B.ByteString
+    -- ^ namespace for this lock
+    -> Double
+    -- ^ timeout in seconds
+    -> B.ByteString
+    -- ^ Name to lock
+    -> Redis Bool
+acquireRenewableLock lock to nm =
+    bracketRenewable lock nm $ acquireLock lock to nm
+
+
+------------------------------------------------------------------------------
+-- | Renews a renewable lock.
+renewRenewableLock
+    :: B.ByteString
+    -- ^ namespace for this lock
+    -> Double
+    -- ^ timeout in seconds
+    -> B.ByteString
+    -- ^ Name to lock
+    -> Redis Bool
+renewRenewableLock lock to nm = bracketRenewable lock nm $ do
+    releaseLock lock nm
+    acquireLock lock to nm
+
+
+-------------------------------------------------------------------------------
+-- | Release a renewable lock
+releaseRenewableLock
+    :: B.ByteString
+    -- ^ namespace for this lock
+    -> B.ByteString
+    -- ^ Name of item to release
+    -> Redis ()
+releaseRenewableLock lock nm = bracketRenewable lock nm $ releaseLock lock nm
 
 
 -------------------------------------------------------------------------------
