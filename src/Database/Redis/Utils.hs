@@ -11,6 +11,7 @@ module Database.Redis.Utils
     , runRedisSimple
 
      -- * Locking
+    , blocking
     , blockLock
     , acquireLock
     , releaseLock
@@ -40,6 +41,7 @@ import           Data.ByteString.Char8  (ByteString)
 import qualified Data.ByteString.Char8  as B
 import           Data.Default
 import           Data.Maybe
+import           Data.Monoid
 import           Data.Serialize         as S
 import           Data.Time.Clock.POSIX
 import           Database.Redis         hiding (decode)
@@ -123,6 +125,18 @@ maybeRedisT f = do
 
 
 -------------------------------------------------------------------------------
+-- | A good default; 25ms initial, exponential backoff with max 10 retries.
+defBlockPolicy :: RetryPolicy
+defBlockPolicy = mempty <> limitRetries 10 <> exponentialBackoff 25000
+
+
+-------------------------------------------------------------------------------
+-- | Block until given action returns True.
+blocking :: MonadIO m => RetryPolicy -> m Bool -> m Bool
+blocking set f = retrying set (const $ return . not) f
+
+
+-------------------------------------------------------------------------------
 -- | Block until lock can be acquired. Will try locking for up to 8
 -- times, with a base delay of 25 miliseconds. Exponential backoff
 -- from there.
@@ -142,7 +156,7 @@ blockLock
     -> B.ByteString
     -- ^ Name of item to lock.
     -> Redis Bool
-blockLock set lock to nm = retrying set (const $ return . not) $ acquireLock lock to nm
+blockLock set lock to nm = blocking set $ acquireLock lock to nm
 
 
 
@@ -230,13 +244,15 @@ bracketRenewable
     -- ^ action to bracket
     -> Redis (Maybe a)
 bracketRenewable lock nm action = do
-    a <- acquireLock lock 5 (nm<>"_lock")
+    a <- blocking defBlockPolicy $ acquireLock lock 5 nm'
     case a of
       False -> return Nothing
       True -> do
         res <- action
-        releaseLock lock nm
+        releaseLock lock nm'
         return $ Just res
+  where
+    nm' = nm <> "_lock"
 
 
 -------------------------------------------------------------------------------
@@ -254,7 +270,7 @@ blockRenewableLock
     -- ^ Name of item to lock.
     -> Redis Bool
 blockRenewableLock set lock to nm =
-    retrying set (const $ return . not) $
+    blocking set $
     acquireRenewableLock lock to nm
 
 
