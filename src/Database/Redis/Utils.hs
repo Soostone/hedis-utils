@@ -11,7 +11,7 @@ module Database.Redis.Utils
     , runRedisSimple
 
      -- * Locking
-    , blocking
+    , blocking, defBlockPolicy
     , blockLock
     , acquireLock
     , releaseLock
