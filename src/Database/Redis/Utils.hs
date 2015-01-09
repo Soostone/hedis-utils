@@ -220,6 +220,7 @@ releaseLock lock nm = unwrap (del [nm']) >> return ()
                             ---------------------
 
 
+-------------------------------------------------------------------------------
 bracketRenewable
     :: B.ByteString
     -- ^ namespace for this lock
@@ -227,12 +228,15 @@ bracketRenewable
     -- ^ Name to lock
     -> Redis a
     -- ^ action to bracket
-    -> Redis a
+    -> Redis (Maybe a)
 bracketRenewable lock nm action = do
-    acquireLock lock 5 (nm<>"_lock")
-    res <- action
-    releaseLock lock nm
-    return res
+    a <- acquireLock lock 5 (nm<>"_lock")
+    case a of
+      False -> return Nothing
+      True -> do
+        res <- action
+        releaseLock lock nm
+        return $ Just res
 
 
 -------------------------------------------------------------------------------
@@ -250,7 +254,8 @@ blockRenewableLock
     -- ^ Name of item to lock.
     -> Redis Bool
 blockRenewableLock set lock to nm =
-    retrying set (const $ return . not) $ acquireRenewableLock lock to nm
+    retrying set (const $ return . not) $
+    acquireRenewableLock lock to nm
 
 
 -------------------------------------------------------------------------------
@@ -264,7 +269,8 @@ acquireRenewableLock
     -- ^ Name to lock
     -> Redis Bool
 acquireRenewableLock lock to nm =
-    bracketRenewable lock nm $ acquireLock lock to nm
+    fromMaybe False `fmap`
+    bracketRenewable lock nm (acquireLock lock to nm)
 
 
 ------------------------------------------------------------------------------
@@ -277,9 +283,10 @@ renewRenewableLock
     -> B.ByteString
     -- ^ Name to lock
     -> Redis Bool
-renewRenewableLock lock to nm = bracketRenewable lock nm $ do
-    releaseLock lock nm
-    acquireLock lock to nm
+renewRenewableLock lock to nm =
+    fmap (fromMaybe False) $ bracketRenewable lock nm $ do
+      releaseLock lock nm
+      acquireLock lock to nm
 
 
 -------------------------------------------------------------------------------
@@ -289,8 +296,11 @@ releaseRenewableLock
     -- ^ namespace for this lock
     -> B.ByteString
     -- ^ Name of item to release
-    -> Redis ()
-releaseRenewableLock lock nm = bracketRenewable lock nm $ releaseLock lock nm
+    -> Redis Bool
+releaseRenewableLock lock nm =
+    fmap (maybe False (const True)) $
+    bracketRenewable lock nm $
+    releaseLock lock nm
 
 
 -------------------------------------------------------------------------------
