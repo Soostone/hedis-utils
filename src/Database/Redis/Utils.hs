@@ -125,9 +125,11 @@ maybeRedisT f = do
 
 
 -------------------------------------------------------------------------------
--- | A good default; 25ms initial, exponential backoff with max 10 retries.
+-- | A good default; 10ms initial, exponential backoff with max 10
+-- retries and a cap of 1 second delay.
 defBlockPolicy :: RetryPolicy
-defBlockPolicy = mempty <> limitRetries 10 <> exponentialBackoff 25000
+defBlockPolicy = capDelay 1000000 $
+  mempty <> limitRetries 10 <> exponentialBackoff 10000
 
 
 -------------------------------------------------------------------------------
@@ -137,9 +139,7 @@ blocking set f = retrying set (const $ return . not) f
 
 
 -------------------------------------------------------------------------------
--- | Block until lock can be acquired. Will try locking for up to 8
--- times, with a base delay of 25 miliseconds. Exponential backoff
--- from there.
+-- | Block until lock can be acquired.
 --
 -- This function implements a solid locking mechanism using the
 -- algorithm described in one of the redis.io comments. It uses getset
