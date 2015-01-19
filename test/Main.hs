@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable    #-}
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -7,9 +8,16 @@ module Main where
 
 
 -------------------------------------------------------------------------------
+import           Control.Concurrent
+import           Control.Concurrent.Async
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.Trans
 import           Control.Retry
 import qualified Data.ByteString.Char8               as B
+import           Data.IORef
 import           Data.Serialize                      as S
+import           Data.Typeable
 import           Database.Redis
 import           Database.Redis.Utils
 import           GHC.Generics
@@ -31,6 +39,7 @@ main = do
        , testProperty "serialize custom type works" prop_serialize_works
        , testProperty "push/pop FIFO custom type" (prop_fifo_custom c)
        , testProperty "locking works" (prop_locking c)
+       , testProperty "renewable locks work" (prop_renewable_lock c)
        , testProperty "short blockLock fails" (prop_blocklock_fail c)
        , testProperty "blockLock eventually succeeds" (prop_blocklock c)
        ]
@@ -65,6 +74,57 @@ prop_blocklock_fail c (ns, nm) = monadic $ do
   where
     redisPolicy = constantDelay 500 <> limitRetries 2
 
+
+------------------------------------------------------------------------------
+prop_renewable_lock c = monadic $ do
+    let ns = "locktest"
+        nm = "renewable"
+    let lockTime = 5
+    l <- runRedis c $ acquireRenewableLock ns lockTime nm
+    a <- spawnLockRenewer c ns lockTime nm
+    stoleRef <- newIORef False
+    let tryToSteal = do
+          stole <- runRedis c $ acquireRenewableLock ns lockTime nm
+          if stole then writeIORef stoleRef True else tryToSteal
+    b <- async tryToSteal
+    threadDelay (round $ 15 * 1e6)
+    cancel b
+    cancel a
+    stole <- readIORef stoleRef
+    return $ l && not stole
+
+
+
+
+------------------------------------------------------------------------------
+spawnLockRenewer
+    :: Connection
+    -> B.ByteString
+    -> Double
+    -> B.ByteString
+    -> IO (Async ())
+spawnLockRenewer c lock to nm = do
+    liftIO $ asyncLinked $ forever $ do
+        let sleepTime = if to > 4 then to - 2 else to / 2
+        threadDelay (round $ sleepTime * 1e6)
+        _ <- runRedis c $ renewRenewableLock lock to nm
+        return ()
+
+
+data InternalCancel = InternalCancel deriving (Eq,Show,Read,Ord,Typeable)
+instance Exception InternalCancel
+
+------------------------------------------------------------------------------
+asyncLinked :: IO () -> IO (Async ())
+asyncLinked f = do
+    a <- async (f `catch` (\ InternalCancel -> return ()))
+    link a
+    return a
+
+-------------------------------------------------------------------------------
+-- | Cancel a linked action without killing its supervising thread.
+cancelLinked :: Async a -> IO ()
+cancelLinked a = cancelWith a InternalCancel
 
 
 -------------------------------------------------------------------------------
