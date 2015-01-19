@@ -79,21 +79,22 @@ prop_blocklock_fail c (ns, nm) = monadic $ do
 prop_renewable_lock c = monadic $ do
     let ns = "locktest"
         nm = "renewable"
-    let lockTime = 5
+    let lockTime = 2
     l <- runRedis c $ acquireRenewableLock ns lockTime nm
     a <- spawnLockRenewer c ns lockTime nm
     stoleRef <- newIORef False
     let tryToSteal = do
           stole <- runRedis c $ acquireRenewableLock ns lockTime nm
-          if stole then writeIORef stoleRef True else tryToSteal
+          if stole
+            then putStrLn "Steal!" >> writeIORef stoleRef True
+            else tryToSteal
     b <- async tryToSteal
     threadDelay (round $ 15 * 1e6)
     cancel b
+    threadDelay (round $ 1 * 1e6)
     cancel a
     stole <- readIORef stoleRef
     return $ l && not stole
-
-
 
 
 ------------------------------------------------------------------------------
@@ -107,8 +108,15 @@ spawnLockRenewer c lock to nm = do
     liftIO $ asyncLinked $ forever $ do
         let sleepTime = if to > 4 then to - 2 else to / 2
         threadDelay (round $ sleepTime * 1e6)
-        _ <- runRedis c $ renewRenewableLock lock to nm
-        return ()
+        go
+  where
+    go = do
+      putStrLn "Calling renew"
+      res <- runRedis c $ renewRenewableLock lock to nm
+      if res
+        then putStrLn "Renew succeeded"
+        else putStrLn "Renew failed" >> go
+
 
 
 data InternalCancel = InternalCancel deriving (Eq,Show,Read,Ord,Typeable)
