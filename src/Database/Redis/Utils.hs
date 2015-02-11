@@ -28,6 +28,10 @@ module Database.Redis.Utils
     , pushFIFO
     , popFIFO
 
+    -- * Transformer utils
+    , maybeRedisT
+    , redisT
+
     ) where
 
 
