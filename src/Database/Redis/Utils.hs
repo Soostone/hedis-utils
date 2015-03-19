@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
 
 module Database.Redis.Utils
     (
@@ -79,7 +80,7 @@ retryRedis max msg c f = go `catch` handle
     handle e = error . concat $
            [ "Hedis: Retried ", show max, " times but failed. Error: "
            , show e, ". Message: ", msg ]
-    go = recoverAll (def <> limitRetries max) $ runRedis c f
+    go = recoverAll (def <> limitRetries max) $ const $ runRedis c f
 
 
 
@@ -139,7 +140,7 @@ defBlockPolicy = capDelay 1000000 $
 -------------------------------------------------------------------------------
 -- | Block until given action returns True.
 blocking :: MonadIO m => RetryPolicy -> m Bool -> m Bool
-blocking set f = retrying set (const $ return . not) f
+blocking set f = retrying set (const $ return . not) (const f)
 
 
 -------------------------------------------------------------------------------

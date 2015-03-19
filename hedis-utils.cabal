@@ -27,7 +27,7 @@ library
     , errors
     , hedis           >=0.6 && <0.7
     , network
-    , retry           >= 0.5 && < 0.8
+    , retry           >= 0.7 && < 0.8
     , safe
     , time
     , transformers
