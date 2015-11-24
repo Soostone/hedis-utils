@@ -19,7 +19,7 @@ library
 
   other-extensions:    RankNTypes, ScopedTypeVariables
   build-depends:
-      base            >=4.6 && <4.8
+      base            >=4.6 && <5
     , bytestring
     , cereal
     , configurator
