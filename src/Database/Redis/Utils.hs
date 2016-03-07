@@ -105,19 +105,19 @@ unexpected r = error $ "Received an unexpected Left response from Redis. Reply: 
 
 
 -------------------------------------------------------------------------------
--- | Lift the annoying Redis (Either Reply) return type into an 'EitherT'.
-redisT :: (Functor m, Show e) => m (Either e b) -> EitherT String m b
-redisT f = bimapEitherT show id (EitherT f)
+-- | Lift the annoying Redis (Either Reply) return type into an 'ExceptT'.
+redisT :: (Functor m, Show e) => m (Either e b) -> ExceptT String m b
+redisT f = bimapExceptT show id (ExceptT f)
 
 
 -------------------------------------------------------------------------------
 -- | Lift the even more annyong Redis (Either Reply (Maybe a)) type
--- into an EitherT.
-maybeRedisT :: (Monad m, Functor m, Show e) => m (Either e (Maybe b)) -> EitherT String m b
+-- into an ExceptT.
+maybeRedisT :: (Monad m, Functor m, Show e) => m (Either e (Maybe b)) -> ExceptT String m b
 maybeRedisT f = do
     res <- redisT f
     case res of
-      Nothing -> left "redis returned no object (Nothing)"
+      Nothing -> throwE "redis returned no object (Nothing)"
       Just x -> return x
 
 

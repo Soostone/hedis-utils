@@ -24,7 +24,7 @@ library
     , cereal
     , configurator
     , data-default
-    , errors          < 2.0
+    , errors          >= 2.0 && <2.2
     , hedis           >=0.6 && <0.7
     , network
     , retry           >= 0.7 && < 0.8
