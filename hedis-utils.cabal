@@ -25,7 +25,7 @@ library
     , configurator
     , data-default
     , errors          >= 2.0 && <2.2
-    , hedis           >=0.6 && <0.7
+    , hedis           >=0.6 && <0.10
     , network
     , retry           >= 0.7 && < 0.8
     , safe
