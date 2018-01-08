@@ -8,3 +8,4 @@ cabal-dev
 TAGS
 .cabal-sandbox
 cabal.sandbox.config
+.stack-work

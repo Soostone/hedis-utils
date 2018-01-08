@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE DeriveDataTypeable    #-}
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE FlexibleInstances     #-}
@@ -16,6 +17,7 @@ import           Control.Monad.Trans
 import           Control.Retry
 import qualified Data.ByteString.Char8               as B
 import           Data.IORef
+import           Data.Monoid
 import           Data.Serialize                      as S
 import           Data.Typeable
 import           Database.Redis
@@ -28,9 +30,7 @@ import           Test.SmallCheck.Series
 -------------------------------------------------------------------------------
 
 
-
-
-
+main :: IO ()
 main = do
     c <- connect defaultConnectInfo
     defaultMain [
@@ -55,46 +55,56 @@ prop_locking c (ns, nm) = monadic $ do
 
 
 -------------------------------------------------------------------------------
-prop_blocklock :: Connection -> (B.ByteString, B.ByteString) -> Property IO
-prop_blocklock c (ns, nm) = monadic $ do
+prop_blocklock :: Connection -> Property IO
+prop_blocklock c = monadic $ do
+      putStrLn "prop_blocklock"
       l <- runRedis c $ blockLock redisPolicy ns 0.5 nm
       l' <- runRedis c $ blockLock redisPolicy ns 0.5 nm
       runRedis c $ releaseLock ns nm
       return $ l && l'
   where
+    ns = "locktest"
+    nm = "blocklock"
+    redisPolicy :: RetryPolicy
     redisPolicy = capDelay 5000000 $ exponentialBackoff 25000 <> limitRetries 12
 
 
 -------------------------------------------------------------------------------
+prop_blocklock_fail :: Connection -> (B.ByteString, B.ByteString) -> Property IO
 prop_blocklock_fail c (ns, nm) = monadic $ do
     l <- runRedis c $ blockLock redisPolicy ns 3 nm
     l' <- runRedis c $ blockLock redisPolicy ns 3 nm
     runRedis c $ releaseLock ns nm
     return $ l && not l'
   where
+    redisPolicy :: RetryPolicy
     redisPolicy = constantDelay 500 <> limitRetries 2
 
 
 ------------------------------------------------------------------------------
+prop_renewable_lock :: Connection -> Property IO
 prop_renewable_lock c = monadic $ do
     let ns = "locktest"
         nm = "renewable"
     let lockTime = 2
-    l <- runRedis c $ acquireRenewableLock ns lockTime nm
-    a <- spawnLockRenewer c ns lockTime nm
-    stoleRef <- newIORef False
-    let tryToSteal = do
-          stole <- runRedis c $ acquireRenewableLock ns lockTime nm
-          if stole
-            then putStrLn "Steal!" >> writeIORef stoleRef True
-            else tryToSteal
-    b <- async tryToSteal
-    threadDelay (round $ 15 * 1e6)
-    cancel b
-    threadDelay (round $ 1 * 1e6)
-    cancel a
-    stole <- readIORef stoleRef
-    return $ l && not stole
+    gotInitialLock <- runRedis c $ acquireRenewableLock ns lockTime nm
+    if gotInitialLock
+       then do
+         a <- spawnLockRenewer c ns lockTime nm
+         stoleRef <- newIORef False
+         let tryToSteal = do
+               stole <- runRedis c $ acquireRenewableLock ns lockTime nm
+               if stole
+                 then putStrLn "Steal!" >> writeIORef stoleRef True
+                 else tryToSteal
+         b <- async tryToSteal
+         threadDelay (secondsInMicros 15)
+         cancel b
+         threadDelay ((secondsInMicros 1))
+         cancelLinked a
+         stole <- readIORef stoleRef
+         return $ not stole
+       else return False
 
 
 ------------------------------------------------------------------------------
@@ -104,15 +114,15 @@ spawnLockRenewer
     -> Double
     -> B.ByteString
     -> IO (Async ())
-spawnLockRenewer c lock to nm = do
+spawnLockRenewer c lock tout nm = do
     liftIO $ asyncLinked $ forever $ do
-        let sleepTime = if to > 4 then to - 2 else to / 2
-        threadDelay (round $ sleepTime * 1e6)
+        let sleepTime = if tout > 4 then tout - 2 else tout / 2
+        threadDelay (secondsInMicros sleepTime)
         go
   where
     go = do
       putStrLn "Calling renew"
-      res <- runRedis c $ renewRenewableLock lock to nm
+      res <- runRedis c $ renewRenewableLock lock tout nm
       if res
         then putStrLn "Renew succeeded"
         else putStrLn "Renew failed" >> go
@@ -125,7 +135,7 @@ instance Exception InternalCancel
 ------------------------------------------------------------------------------
 asyncLinked :: IO () -> IO (Async ())
 asyncLinked f = do
-    a <- async (f `catch` (\ InternalCancel -> return ()))
+    a <- async (f `catch` (\InternalCancel -> return ()))
     link a
     return a
 
@@ -138,7 +148,7 @@ cancelLinked a = cancelWith a InternalCancel
 -------------------------------------------------------------------------------
 prop_roundtrip :: Connection -> B.ByteString -> Property IO
 prop_roundtrip c x = monadic $ runRedis c $ do
-    lpush "testing" [x]
+    _ <- lpush "testing" [x]
     res <- unwrap $ lpop "testing"
     return $ res == Just x
 
@@ -174,3 +184,7 @@ prop_fifo_custom c x = monadic $ runRedis c $ do
     [n] <- popFIFO "testing_custom" 1
     return $ n == x
 
+
+
+secondsInMicros :: Double -> Int
+secondsInMicros = round . (* 1e6)

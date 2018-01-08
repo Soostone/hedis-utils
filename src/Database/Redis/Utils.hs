@@ -52,8 +52,7 @@ import           Data.Serialize         as S
 import           Data.Time.Clock.POSIX
 import           Database.Redis         hiding (decode)
 import qualified Database.Redis         as R
-import           Prelude                hiding (catch)
-import           Safe
+import           Prelude
 -------------------------------------------------------------------------------
 
 
@@ -75,13 +74,13 @@ retryRedis
     -> Redis a
     -- ^ Action to run
     -> IO a
-retryRedis max msg c f = go `catch` handle
+retryRedis mx msg c f = go `catch` handleEx
   where
-    handle :: SomeException -> IO a
-    handle e = error . concat $
-           [ "Hedis: Retried ", show max, " times but failed. Error: "
+    handleEx :: SomeException -> IO a
+    handleEx e = error . concat $
+           [ "Hedis: Retried ", show mx, " times but failed. Error: "
            , show e, ". Message: ", msg ]
-    go = recoverAll (def <> limitRetries max) $ const $ runRedis c f
+    go = recoverAll (def <> limitRetries mx) $ const $ runRedis c f
 
 
 
@@ -141,7 +140,7 @@ defBlockPolicy = capDelay 1000000 $
 -------------------------------------------------------------------------------
 -- | Block until given action returns True.
 blocking :: MonadIO m => RetryPolicy -> m Bool -> m Bool
-blocking set f = retrying set (const $ return . not) (const f)
+blocking settings f = retrying settings (const $ return . not) (const f)
 
 
 -------------------------------------------------------------------------------
@@ -162,7 +161,7 @@ blockLock
     -> B.ByteString
     -- ^ Name of item to lock.
     -> Redis Bool
-blockLock set lock to nm = blocking set $ acquireLock lock to nm
+blockLock settings lock to nm = blocking settings $ acquireLock lock to nm
 
 
 
@@ -275,8 +274,8 @@ blockRenewableLock
     -> B.ByteString
     -- ^ Name of item to lock.
     -> Redis Bool
-blockRenewableLock set lock to nm =
-    blocking set $
+blockRenewableLock settings lock to nm =
+    blocking settings $
     acquireRenewableLock lock to nm
 
 
@@ -326,6 +325,7 @@ releaseRenewableLock lock nm =
 
 
 -------------------------------------------------------------------------------
+mkLockName :: ByteString -> ByteString -> ByteString
 mkLockName lock nm = B.intercalate ":" ["_lock", lock, nm]
 
 

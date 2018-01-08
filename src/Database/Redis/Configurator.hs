@@ -6,11 +6,10 @@ module Database.Redis.Configurator
 
 
 -------------------------------------------------------------------------------
-import           Control.Applicative
+import           Control.Applicative     as A
 import qualified Data.Configurator       as C
 import qualified Data.Configurator.Types as C
 import           Database.Redis          as H
-import           Network.Socket
 -------------------------------------------------------------------------------
 
 
@@ -22,7 +21,7 @@ getRedisConfig c = do
     p <- C.lookupDefault 6379 c "port"
     let port = H.PortNumber . fromIntegral $ (p :: Int)
     n <- C.lookupDefault 3 c "max-conn"
-    to <- fromIntegral <$> C.lookupDefault (15 :: Int) c "timeout"
+    to <- fromIntegral A.<$> C.lookupDefault (15 :: Int) c "timeout"
     return $ H.defaultConnectInfo { H.connectHost = host
                                   , H.connectPort = port
                                   , H.connectMaxConnections = n
