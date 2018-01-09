@@ -1,6 +1,9 @@
 resolver: lts-10.3
 packages:
 - .
+extra-deps:
+  - hedgehog-0.5.1
+  - tasty-hedgehog-0.1.0.1
 flags:
   hedis-utils:
     lib-Werror: true
