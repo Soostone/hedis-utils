@@ -5,6 +5,9 @@ dist: trusty
 # Choose a lightweight base image; we provide our own build tools.
 language: c
 
+services:
+  - redis-server
+
 # GHC depends on GMP. You can add other dependencies here as well.
 addons:
   apt:
