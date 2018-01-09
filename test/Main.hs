@@ -25,6 +25,7 @@ import           GHC.Generics
 import           Hedgehog                 as HH
 import qualified Hedgehog.Gen             as Gen
 import qualified Hedgehog.Range           as Range
+import           System.Timeout
 import           Test.Tasty
 import           Test.Tasty.Hedgehog
 -------------------------------------------------------------------------------
@@ -48,6 +49,7 @@ tests c = testGroup "hedis-utils"
   , prop_blocklock_fail c
   , prop_blocklock c
   , prop_lock_expire c
+  , prop_blocklock_exhaustion
   ]
 
 
@@ -227,6 +229,34 @@ prop_fifo_custom c = testProperty "push/pop FIFO custom type" $ property $ do
   n === td
 
 
+-------------------------------------------------------------------------------
+prop_blocklock_exhaustion :: TestTree
+prop_blocklock_exhaustion = testProperty "blockLock does not hold a connection the entire time" $ property $ do
+  c1 <- liftIO $ connect defaultConnectInfo { connectMaxConnections = 1 }
+  l1 <- liftIO $ runRedis c1 $ acquireLock ns lockTime nm
+  unless l1 $ footnote "Failed to acquire initial lock"
+  HH.assert l1
 
+  blockAsync <- liftIO $ async $
+    runRedis c1 $ blockLock blockPolicy ns lockTime nm
+
+  stat <- liftIO $ timeout (secondsInMicros 1) $
+    runRedis c1 ping
+
+  unless (stat == Just (Right Pong)) $
+    footnote "Expected blockLock to not hold connection but it did"
+  stat === Just (Right Pong)
+
+  liftIO $ cancel blockAsync
+  liftIO $ runRedis c1 $ releaseLock ns nm
+  where
+    blockPolicy :: RetryPolicy
+    blockPolicy = capDelay (secondsInMicros 5) (exponentialBackoff 10000)
+    lockTime = 5
+    ns = "locktest"
+    nm = "blockLock"
+
+
+-------------------------------------------------------------------------------
 secondsInMicros :: Double -> Int
 secondsInMicros = round . (* 1e6)
