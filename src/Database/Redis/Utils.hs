@@ -300,7 +300,7 @@ renewRenewableLock
     :: B.ByteString
     -- ^ namespace for this lock
     -> Double
-    -- ^ timeout in seconds
+    -- ^ timeout in seconds.
     -> B.ByteString
     -- ^ Name to lock
     -> Redis Bool

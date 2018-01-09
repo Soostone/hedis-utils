@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE DeriveDataTypeable    #-}
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE FlexibleInstances     #-}
@@ -15,53 +14,60 @@ import           Control.Exception
 import           Control.Monad
 import           Control.Monad.Trans
 import           Control.Retry
-import qualified Data.ByteString.Char8               as B
+import qualified Data.ByteString.Char8    as B
 import           Data.IORef
 import           Data.Monoid
-import           Data.Serialize                      as S
+import           Data.Serialize           as S
 import           Data.Typeable
 import           Database.Redis
 import           Database.Redis.Utils
 import           GHC.Generics
-import           Test.Framework
-import           Test.Framework.Providers.SmallCheck
-import           Test.SmallCheck
-import           Test.SmallCheck.Series
+import           Hedgehog                 as HH
+import qualified Hedgehog.Gen             as Gen
+import qualified Hedgehog.Range           as Range
+import           Test.Tasty
+import           Test.Tasty.Hedgehog
+import           Test.Tasty.HUnit
 -------------------------------------------------------------------------------
 
 
 main :: IO ()
 main = do
-    c <- connect defaultConnectInfo
-    defaultMain [
-         testProperty "simple BS roundtrip" (prop_roundtrip c)
-       , testProperty "push/pop FIFO" (prop_fifo c)
-       , testProperty "serialize custom type works" prop_serialize_works
-       , testProperty "push/pop FIFO custom type" (prop_fifo_custom c)
-       , testProperty "locking works" (prop_locking c)
-       , testProperty "renewable locks work" (prop_renewable_lock c)
-       , testProperty "short blockLock fails" (prop_blocklock_fail c)
-       , testProperty "blockLock eventually succeeds" (prop_blocklock c)
-       ]
+  c <- connect defaultConnectInfo
+  defaultMain (tests c)
 
 
 -------------------------------------------------------------------------------
-prop_locking :: Connection -> (B.ByteString, B.ByteString) -> Property IO
-prop_locking c (ns, nm) = monadic $ do
-  l <- runRedis c $ acquireLock ns 3 nm
-  l' <- runRedis c $ acquireLock ns 3 nm
-  runRedis c $ releaseLock ns nm
-  return $ l && not l'
+tests :: Connection -> TestTree
+tests c = testGroup "hedis-utils"
+  [ prop_roundtrip c
+  , prop_fifo c
+  , prop_serialize_works
+  , prop_fifo_custom c
+  , prop_locking c
+  , prop_renewable_lock c
+  , prop_blocklock_fail c
+  , prop_blocklock c
+  ]
+
+-------------------------------------------------------------------------------
+prop_locking :: Connection -> TestTree
+prop_locking c = testProperty "locking works" $ property $ do
+  ns <- forAll (Gen.bytes (Range.linear 1 20))
+  nm <- forAll (Gen.bytes (Range.linear 1 20))
+  l <- liftIO $ runRedis c $ acquireLock ns 3 nm
+  l' <- liftIO $ runRedis c $ acquireLock ns 3 nm
+  liftIO $ runRedis c $ releaseLock ns nm
+  HH.assert $ l && not l'
 
 
 -------------------------------------------------------------------------------
-prop_blocklock :: Connection -> Property IO
-prop_blocklock c = monadic $ do
-      putStrLn "prop_blocklock"
-      l <- runRedis c $ blockLock redisPolicy ns 0.5 nm
-      l' <- runRedis c $ blockLock redisPolicy ns 0.5 nm
-      runRedis c $ releaseLock ns nm
-      return $ l && l'
+prop_blocklock :: Connection -> TestTree
+prop_blocklock c = testProperty "blockLock eventually succeeds" $ property $ do
+  l <- liftIO $ runRedis c $ blockLock redisPolicy ns 0.5 nm
+  l' <- liftIO $ runRedis c $ blockLock redisPolicy ns 0.5 nm
+  liftIO $ runRedis c $ releaseLock ns nm
+  HH.assert $ l && l'
   where
     ns = "locktest"
     nm = "blocklock"
@@ -70,41 +76,50 @@ prop_blocklock c = monadic $ do
 
 
 -------------------------------------------------------------------------------
-prop_blocklock_fail :: Connection -> (B.ByteString, B.ByteString) -> Property IO
-prop_blocklock_fail c (ns, nm) = monadic $ do
-    l <- runRedis c $ blockLock redisPolicy ns 3 nm
-    l' <- runRedis c $ blockLock redisPolicy ns 3 nm
-    runRedis c $ releaseLock ns nm
-    return $ l && not l'
+prop_blocklock_fail :: Connection -> TestTree
+prop_blocklock_fail c = testProperty "short blocklock fails" $ property $ do
+    ns <- forAll (Gen.bytes (Range.linear 1 20))
+    nm <- forAll (Gen.bytes (Range.linear 1 20))
+    l <- liftIO $ runRedis c $ blockLock redisPolicy ns 3 nm
+    l' <- liftIO $ runRedis c $ blockLock redisPolicy ns 3 nm
+    liftIO $ runRedis c $ releaseLock ns nm
+    HH.assert $ l && not l'
   where
     redisPolicy :: RetryPolicy
     redisPolicy = constantDelay 500 <> limitRetries 2
 
 
 ------------------------------------------------------------------------------
-prop_renewable_lock :: Connection -> Property IO
-prop_renewable_lock c = monadic $ do
-    let ns = "locktest"
-        nm = "renewable"
-    let lockTime = 2
-    gotInitialLock <- runRedis c $ acquireRenewableLock ns lockTime nm
-    if gotInitialLock
-       then do
-         a <- spawnLockRenewer c ns lockTime nm
-         stoleRef <- newIORef False
-         let tryToSteal = do
-               stole <- runRedis c $ acquireRenewableLock ns lockTime nm
-               if stole
-                 then putStrLn "Steal!" >> writeIORef stoleRef True
-                 else tryToSteal
-         b <- async tryToSteal
-         threadDelay (secondsInMicros 15)
-         cancel b
-         threadDelay ((secondsInMicros 1))
-         cancelLinked a
-         stole <- readIORef stoleRef
-         return $ not stole
-       else return False
+prop_renewable_lock :: Connection -> TestTree
+prop_renewable_lock c = testCase "renewable lock works" $ do
+  gotInitialLock <- runRedis c $ acquireRenewableLock ns lockTime nm
+  if gotInitialLock
+     then do
+       a <- spawnLockRenewer c ns lockTime nm
+       stoleRef <- newIORef False
+       let tryToSteal = do
+             stole <- runRedis c $ acquireRenewableLock ns lockTime nm
+             if stole
+               then putStrLn "Steal!" >> writeIORef stoleRef True
+               else tryToSteal
+       b <- async tryToSteal
+       threadDelay (secondsInMicros 15)
+       cancel b
+       threadDelay ((secondsInMicros 1))
+       cancelLinked a
+       stole <- readIORef stoleRef
+       assertBool "Expected lock to not be stolen but it was" (not stole)
+     else assertFailure "Failed to acquire initial lock"
+  where
+    ns = "locktest"
+    nm = "renewable"
+    -- Note: renewable lock only really allows the lock holder to
+    -- renew properly if the lock time is > 5s. Renewable locks
+    -- acquire an outer lock and then do operations against the target
+    -- lock in a blocking fashion. That blocking is hardcoded to 5s,
+    -- so it could lock out renew attempts longer than the lock is
+    -- alive and steal the lock
+    lockTime = 10
 
 
 ------------------------------------------------------------------------------
@@ -146,18 +161,24 @@ cancelLinked a = cancelWith a InternalCancel
 
 
 -------------------------------------------------------------------------------
-prop_roundtrip :: Connection -> B.ByteString -> Property IO
-prop_roundtrip c x = monadic $ runRedis c $ do
-    _ <- lpush "testing" [x]
-    res <- unwrap $ lpop "testing"
-    return $ res == Just x
+prop_roundtrip :: Connection -> TestTree
+prop_roundtrip c = testProperty "simple BS roundtrip" $ property $ do
+    x <- forAll (Gen.bytes (Range.linear 0 20))
+    res <- liftIO $ runRedis c $ do
+      _ <- lpush "testing" [x]
+      unwrap $ lpop "testing"
+    res === Just x
 
 
-prop_fifo :: Connection -> Int -> String -> Property IO
-prop_fifo c x y = monadic $ runRedis c $ do
-    pushFIFO "testing" (x,y)
-    [(a,b)] <- popFIFO "testing" 1
-    return $ a == x && b == y
+prop_fifo :: Connection -> TestTree
+prop_fifo c = testProperty "push/pop FIFO" $ property $ do
+    int <- forAll (Gen.int Range.linearBounded)
+    str <- forAll (Gen.string (Range.linear 0  20) Gen.unicode)
+    [(a,b)] <- liftIO $ runRedis c $ do
+      pushFIFO "testing" (int,str)
+      popFIFO "testing" 1
+    a === int
+    b === str
 
 
 
@@ -167,22 +188,27 @@ data TestData = TestData {
     } deriving (Eq, Generic, Show, Read)
 
 
+genTestData :: Gen TestData
+genTestData = TestData
+  <$> Gen.int Range.linearBounded
+  <*> Gen.bytes (Range.linear 0 20)
+
+
 instance Serialize TestData
-instance Monad m => Serial m TestData
 
 
-instance Monad m => Serial m B.ByteString where
-    series = B.pack `fmap` series
+prop_serialize_works :: TestTree
+prop_serialize_works = testProperty "serialize custom type works" $ property $ do
+  td <- forAll genTestData
+  S.decode (S.encode td) === Right td
 
-
-prop_serialize_works :: TestData -> Bool
-prop_serialize_works x = S.decode (S.encode x) == Right x
-
-prop_fifo_custom :: Connection -> TestData -> Property IO
-prop_fifo_custom c x = monadic $ runRedis c $ do
-    pushFIFO "testing_custom" x
-    [n] <- popFIFO "testing_custom" 1
-    return $ n == x
+prop_fifo_custom :: Connection -> TestTree
+prop_fifo_custom c = testProperty "push/pop FIFO custom type" $ property $ do
+  td <- forAll genTestData
+  [n] <- liftIO $ runRedis c $ do
+    pushFIFO "testing_custom" td
+    popFIFO "testing_custom" 1
+  n === td
 
 
 

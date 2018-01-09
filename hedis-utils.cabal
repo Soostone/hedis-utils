@@ -13,6 +13,7 @@ cabal-version:       >=1.10
 
 flag lib-Werror
   default: False
+  manual: True
 
 library
   exposed-modules:
@@ -65,9 +66,10 @@ test-suite test
     , hedis-utils
     , mtl
     , retry
-    , smallcheck
-    , test-framework
-    , test-framework-smallcheck
+    , tasty
+    , tasty-hunit
+    , tasty-hedgehog
+    , hedgehog
 
   default-language:    Haskell2010
 
