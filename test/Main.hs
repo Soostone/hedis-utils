@@ -85,8 +85,8 @@ prop_lock_expire c = localOption (HedgehogTestLimit 25) $ testProperty "locks ex
 prop_blocklock :: Connection -> TestTree
 prop_blocklock c = localOption (HedgehogTestLimit 25) $ testProperty "blockLock eventually succeeds" $ property $ do
   lockTTL <- forAll (Gen.double (Range.linearFrac 0.01 0.5))
-  l <- liftIO $ runRedis c $ blockLock redisPolicy ns lockTTL nm
-  l' <- liftIO $ runRedis c $ blockLock redisPolicy ns lockTTL nm
+  l <- liftIO $ blockLock c redisPolicy ns lockTTL nm
+  l' <- liftIO $ blockLock c redisPolicy ns lockTTL nm
   liftIO $ runRedis c $ releaseLock ns nm
   HH.assert $ l && l'
   where
@@ -101,8 +101,8 @@ prop_blocklock_fail :: Connection -> TestTree
 prop_blocklock_fail c = testProperty "short blocklock fails" $ property $ do
     ns <- forAll (Gen.bytes (Range.linear 1 20))
     nm <- forAll (Gen.bytes (Range.linear 1 20))
-    l <- liftIO $ runRedis c $ blockLock redisPolicy ns 3 nm
-    l' <- liftIO $ runRedis c $ blockLock redisPolicy ns 3 nm
+    l <- liftIO $ blockLock c redisPolicy ns 3 nm
+    l' <- liftIO $ blockLock c redisPolicy ns 3 nm
     liftIO $ runRedis c $ releaseLock ns nm
     HH.assert $ l && not l'
   where
@@ -238,7 +238,7 @@ prop_blocklock_exhaustion = testProperty "blockLock does not hold a connection t
   HH.assert l1
 
   blockAsync <- liftIO $ async $
-    runRedis c1 $ blockLock blockPolicy ns lockTime nm
+    blockLock c1 blockPolicy ns lockTime nm
 
   stat <- liftIO $ timeout (secondsInMicros 1) $
     runRedis c1 ping
