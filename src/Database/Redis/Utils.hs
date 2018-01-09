@@ -51,7 +51,6 @@ import           Data.Monoid
 import           Data.Serialize         as S
 import           Data.Time.Clock.POSIX
 import           Database.Redis         hiding (decode)
-import qualified Database.Redis         as R
 import           Prelude
 -------------------------------------------------------------------------------
 
@@ -178,46 +177,21 @@ acquireLock
     -- ^ Name to lock
     -> Redis Bool
 acquireLock lock to nm = do
-    tm <- mkTimeOut to
-    res <- unwrap $ setnx nm' tm
+    res <- setOpts nm' val opts
     case res of
-      True -> return True
-      False -> do
-          curLock <- unwrap $ R.get nm'
-          case curLock of
-            -- someone else unlocked it, retry the process
-            Nothing -> acquireLock lock to nm
-            Just curVal ->
-              case readMay $ B.unpack curVal of
-                -- there is a value in there but I can't even read it
-                Nothing -> getsetMech =<< liftIO getTime
-                Just oldTo -> do
-                  now <- liftIO getTime
-                  case now > oldTo of
-                    -- expired timeout, use getset mechanism
-                    True -> getsetMech now
-                    -- someone has it locked
-                    False -> return False
+      Right Ok -> return True
+      _        -> return False
     where
+      -- | We no longer use the lock value. We could set it to a
+      -- unique id and return it as a handle to make more secure locks
+      -- in the future.
+      val = mempty
+      opts = SetOpts
+        { setSeconds = Nothing
+        , setMilliseconds = Just (doubleSecondsToMillis to)
+        , setCondition = Just Nx -- set if not set
+        }
       nm' = mkLockName lock nm
-
-      -- this is a reliable mechanism to override an
-      -- old/expired/garbled value in the lock. Prevents race
-      -- conditions.
-      getsetMech now = do
-          e <- unwrap $ getset nm' (B.pack . show $ now + to)
-          case e of
-            -- no old value in there, shouldn't happen in practice
-            Nothing -> return True
-            -- check that value read is expired
-            Just curVal' ->
-              case readMay $ B.unpack curVal' of
-                -- can't even read, bizarre
-                Nothing -> return True
-                 -- see if it was expired; if not,
-                 -- someone else beat us to the lock
-                Just oldTo' -> return $ now > oldTo'
-
 
 
 
@@ -240,27 +214,7 @@ releaseLock lock nm = unwrap (del [nm']) >> return ()
 
 
 -------------------------------------------------------------------------------
-bracketRenewable
-    :: B.ByteString
-    -- ^ namespace for this lock
-    -> B.ByteString
-    -- ^ Name to lock
-    -> Redis a
-    -- ^ action to bracket
-    -> Redis (Maybe a)
-bracketRenewable lock nm action = do
-    a <- blocking defBlockPolicy $ acquireLock lock 5 nm'
-    case a of
-      False -> return Nothing
-      True -> do
-        res <- action
-        releaseLock lock nm'
-        return $ Just res
-  where
-    nm' = nm <> "_lock"
-
-
--------------------------------------------------------------------------------
+{-# DEPRECATED blockRenewableLock "Use blockLock" #-}
 -- | Like blockLock, but for renewable locks.
 blockRenewableLock
     :: RetryPolicy
@@ -274,12 +228,12 @@ blockRenewableLock
     -> B.ByteString
     -- ^ Name of item to lock.
     -> Redis Bool
-blockRenewableLock settings lock to nm =
-    blocking settings $
-    acquireRenewableLock lock to nm
+blockRenewableLock = blockLock
 
 
 -------------------------------------------------------------------------------
+{-# DEPRECATED acquireRenewableLock "Use acquireLock" #-}
+
 -- | Like acquireLock, but for renewable locks.
 acquireRenewableLock
     :: B.ByteString
@@ -289,9 +243,7 @@ acquireRenewableLock
     -> B.ByteString
     -- ^ Name to lock
     -> Redis Bool
-acquireRenewableLock lock to nm =
-    fromMaybe False `fmap`
-    bracketRenewable lock nm (acquireLock lock to nm)
+acquireRenewableLock = acquireLock
 
 
 ------------------------------------------------------------------------------
@@ -304,13 +256,17 @@ renewRenewableLock
     -> B.ByteString
     -- ^ Name to lock
     -> Redis Bool
-renewRenewableLock lock to nm =
-    fmap (fromMaybe False) $ bracketRenewable lock nm $ do
-      releaseLock lock nm
-      acquireLock lock to nm
+renewRenewableLock lock to nm = do
+    res <- pexpire nm' (doubleSecondsToMillis to)
+    return $ case res of
+      Right True -> True
+      _          -> False
+  where
+    nm' = mkLockName lock nm
 
 
 -------------------------------------------------------------------------------
+{-# DEPRECATED releaseRenewableLock "Use releaseLock" #-}
 -- | Release a renewable lock
 releaseRenewableLock
     :: B.ByteString
@@ -318,10 +274,7 @@ releaseRenewableLock
     -> B.ByteString
     -- ^ Name of item to release
     -> Redis Bool
-releaseRenewableLock lock nm =
-    fmap (maybe False (const True)) $
-    bracketRenewable lock nm $
-    releaseLock lock nm
+releaseRenewableLock ns nm  = True <$ releaseLock ns nm
 
 
 -------------------------------------------------------------------------------
@@ -371,3 +324,8 @@ popFIFO k n = do
                Right x' -> x'
 
 
+
+
+-------------------------------------------------------------------------------
+doubleSecondsToMillis :: (Integral a) => Double -> a
+doubleSecondsToMillis = round . (*1000)

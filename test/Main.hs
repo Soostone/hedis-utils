@@ -27,7 +27,6 @@ import qualified Hedgehog.Gen             as Gen
 import qualified Hedgehog.Range           as Range
 import           Test.Tasty
 import           Test.Tasty.Hedgehog
-import           Test.Tasty.HUnit
 -------------------------------------------------------------------------------
 
 
@@ -48,7 +47,9 @@ tests c = testGroup "hedis-utils"
   , prop_renewable_lock c
   , prop_blocklock_fail c
   , prop_blocklock c
+  , prop_lock_expire c
   ]
+
 
 -------------------------------------------------------------------------------
 prop_locking :: Connection -> TestTree
@@ -62,10 +63,28 @@ prop_locking c = testProperty "locking works" $ property $ do
 
 
 -------------------------------------------------------------------------------
+prop_lock_expire :: Connection -> TestTree
+prop_lock_expire c = localOption (HedgehogTestLimit 25) $ testProperty "locks expire eventually on their own when not released" $ property $ do
+  lockLifespan <- forAll (Gen.double (Range.linearFrac 0.01 1))
+  waitFor <- forAll (Gen.double (Range.linearFrac (lockLifespan + 0.1) 1))
+  l <- liftIO $ runRedis c $ acquireLock ns lockLifespan nm
+  HH.assert l
+  liftIO $ threadDelay $ secondsInMicros waitFor
+  l' <- liftIO $ runRedis c $ acquireLock ns lockLifespan nm
+  liftIO $ runRedis c $ releaseLock ns nm
+  annotate "Expected second lock to succeed"
+  HH.assert l'
+  where
+    ns = "locktest"
+    nm = "lock_expire"
+
+
+-------------------------------------------------------------------------------
 prop_blocklock :: Connection -> TestTree
-prop_blocklock c = testProperty "blockLock eventually succeeds" $ property $ do
-  l <- liftIO $ runRedis c $ blockLock redisPolicy ns 0.5 nm
-  l' <- liftIO $ runRedis c $ blockLock redisPolicy ns 0.5 nm
+prop_blocklock c = localOption (HedgehogTestLimit 25) $ testProperty "blockLock eventually succeeds" $ property $ do
+  lockTTL <- forAll (Gen.double (Range.linearFrac 0.01 0.5))
+  l <- liftIO $ runRedis c $ blockLock redisPolicy ns lockTTL nm
+  l' <- liftIO $ runRedis c $ blockLock redisPolicy ns lockTTL nm
   liftIO $ runRedis c $ releaseLock ns nm
   HH.assert $ l && l'
   where
@@ -91,35 +110,33 @@ prop_blocklock_fail c = testProperty "short blocklock fails" $ property $ do
 
 ------------------------------------------------------------------------------
 prop_renewable_lock :: Connection -> TestTree
-prop_renewable_lock c = testCase "renewable lock works" $ do
-  gotInitialLock <- runRedis c $ acquireRenewableLock ns lockTime nm
-  if gotInitialLock
-     then do
-       a <- spawnLockRenewer c ns lockTime nm
-       stoleRef <- newIORef False
-       let tryToSteal = do
-             stole <- runRedis c $ acquireRenewableLock ns lockTime nm
-             if stole
-               then putStrLn "Steal!" >> writeIORef stoleRef True
-               else tryToSteal
-       b <- async tryToSteal
-       threadDelay (secondsInMicros 15)
-       cancel b
-       threadDelay ((secondsInMicros 1))
-       cancelLinked a
-       stole <- readIORef stoleRef
-       assertBool "Expected lock to not be stolen but it was" (not stole)
-     else assertFailure "Failed to acquire initial lock"
+prop_renewable_lock c = localOption (HedgehogTestLimit 25) $ testProperty "renewable lock works" $ property $ do
+  lockTime <- forAll (Gen.double (Range.linearFrac 0.01 2))
+  gotInitialLock <- liftIO $ runRedis c $ acquireLock ns lockTime nm
+  when (not gotInitialLock) $ footnote "Failed to acquire initial lock"
+  HH.assert gotInitialLock
+  stoleRef <- liftIO $ newIORef False
+  liftIO $ do
+    renewer <- liftIO $ spawnLockRenewer c ns lockTime nm
+    let tryToSteal = do
+          stole <- runRedis c $ acquireLock ns lockTime nm
+          if stole
+            then putStrLn "Steal!" >> writeIORef stoleRef True
+            else do
+              threadDelay (secondsInMicros (lockTime / 2))
+              tryToSteal
+    thief <- liftIO $ async tryToSteal
+    let thiefLife = lockTime * 3
+    threadDelay (secondsInMicros thiefLife)
+    cancel thief
+    cancelLinked renewer
+    runRedis c $ releaseLock ns nm
+  stole <- liftIO $ readIORef stoleRef
+  when stole $ footnote "Expected lock to not be stolen but it was"
+  HH.assert (not stole)
   where
     ns = "locktest"
     nm = "renewable"
-    -- Note: renewable lock only really allows the lock holder to
-    -- renew properly if the lock time is > 5s. Renewable locks
-    -- acquire an outer lock and then do operations against the target
-    -- lock in a blocking fashion. That blocking is hardcoded to 5s,
-    -- so it could lock out renew attempts longer than the lock is
-    -- alive and steal the lock
-    lockTime = 10
 
 
 ------------------------------------------------------------------------------
@@ -136,10 +153,9 @@ spawnLockRenewer c lock tout nm = do
         go
   where
     go = do
-      putStrLn "Calling renew"
       res <- runRedis c $ renewRenewableLock lock tout nm
       if res
-        then putStrLn "Renew succeeded"
+        then return ()
         else putStrLn "Renew failed" >> go
 
 
