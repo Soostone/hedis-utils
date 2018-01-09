@@ -1,14 +1,16 @@
 name:                hedis-utils
-version:             0.3.1
+version:             0.4.0
 synopsis:            Collection of utilities for working with Redis in Haskell
 license:             BSD3
 license-file:        LICENSE
-author:              Ozgun Ataman
+author:              Ozgun Ataman, Michael Xavier
 maintainer:          ozgun.ataman@soostone.com
 copyright:           Soostone Inc
 category:            Database
 build-type:          Simple
-extra-source-files:  README.md
+extra-source-files:
+  README.md
+  changelog.md
 cabal-version:       >=1.10
 
 flag lib-Werror

@@ -279,7 +279,22 @@ releaseRenewableLock ns nm  = True <$ releaseLock ns nm
 
 -------------------------------------------------------------------------------
 mkLockName :: ByteString -> ByteString -> ByteString
-mkLockName lock nm = B.intercalate ":" ["_lock", lock, nm]
+mkLockName lock nm = B.intercalate ":" [pfx, lock, nm]
+  where
+    pfx = "_lock" <> protocolVersion
+
+
+-------------------------------------------------------------------------------
+-- | This very rarely needs to be bumped to invalidate old batches of
+-- locks when undergoing version updates.
+--
+-- 2 (0.4.0) - Keys never inherently expired but would expire on
+-- read. As such, unclean shutdowns when going between versions of
+-- this library would see a key that would never expire on its own and
+-- would never be able to lock that key again. Setting this protocol
+-- version means on boot, different locks will be taken.
+protocolVersion :: ByteString
+protocolVersion = "2"
 
 
 -------------------------------------------------------------------------------
