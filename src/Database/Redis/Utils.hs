@@ -145,11 +145,13 @@ blocking settings f = retrying settings (const $ return . not) (const f)
 -------------------------------------------------------------------------------
 -- | Block until lock can be acquired.
 --
--- This function implements a solid locking mechanism using the
--- algorithm described in one of the redis.io comments. It uses getset
--- underneath via 'acquireLock'.
+-- This takes a connection to ensure that each attempt at acquiring
+-- the lock does not hold a single connection the entire time. This
+-- helps prevent the connection pool from exhausting while waiting for
+-- a lock.
 blockLock
-    :: RetryPolicy
+    :: Connection
+    -> RetryPolicy
     -- ^ Retry settings for while trying to acquire the lock. As an
     -- example, a 25 milisecond base with 10 exp backoff retries would
     -- work up to a 25 second retry.
@@ -159,8 +161,9 @@ blockLock
     -- ^ timeout in seconds.
     -> B.ByteString
     -- ^ Name of item to lock.
-    -> Redis Bool
-blockLock settings lock to nm = blocking settings $ acquireLock lock to nm
+    -> IO Bool
+blockLock conn settings lock to nm = blocking settings $
+  runRedis conn $ acquireLock lock to nm
 
 
 
@@ -217,7 +220,8 @@ releaseLock lock nm = unwrap (del [nm']) >> return ()
 {-# DEPRECATED blockRenewableLock "Use blockLock" #-}
 -- | Like blockLock, but for renewable locks.
 blockRenewableLock
-    :: RetryPolicy
+    :: Connection
+    -> RetryPolicy
     -- ^ Retry settings for while trying to acquire the lock. As an
     -- example, a 25 milisecond base with 10 exp backoff retries would
     -- work up to a 25 second retry.
@@ -227,7 +231,7 @@ blockRenewableLock
     -- ^ timeout in seconds.
     -> B.ByteString
     -- ^ Name of item to lock.
-    -> Redis Bool
+    -> IO Bool
 blockRenewableLock = blockLock
 
 
