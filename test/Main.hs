@@ -28,6 +28,7 @@ import qualified Hedgehog.Range           as Range
 import           System.Timeout
 import           Test.Tasty
 import           Test.Tasty.Hedgehog
+import           Test.Tasty.Options
 -------------------------------------------------------------------------------
 
 
@@ -66,7 +67,7 @@ prop_locking c = testProperty "locking works" $ property $ do
 
 -------------------------------------------------------------------------------
 prop_lock_expire :: Connection -> TestTree
-prop_lock_expire c = localOption (HedgehogTestLimit 25) $ testProperty "locks expire eventually on their own when not released" $ property $ do
+prop_lock_expire c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "locks expire eventually on their own when not released" $ property $ do
   lockLifespan <- forAll (Gen.double (Range.linearFrac 0.01 1))
   waitFor <- forAll (Gen.double (Range.linearFrac (lockLifespan + 0.1) 1))
   l <- liftIO $ runRedis c $ acquireLock ns lockLifespan nm
@@ -83,7 +84,7 @@ prop_lock_expire c = localOption (HedgehogTestLimit 25) $ testProperty "locks ex
 
 -------------------------------------------------------------------------------
 prop_blocklock :: Connection -> TestTree
-prop_blocklock c = localOption (HedgehogTestLimit 25) $ testProperty "blockLock eventually succeeds" $ property $ do
+prop_blocklock c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "blockLock eventually succeeds" $ property $ do
   lockTTL <- forAll (Gen.double (Range.linearFrac 0.01 0.5))
   l <- liftIO $ blockLock c redisPolicy ns lockTTL nm
   l' <- liftIO $ blockLock c redisPolicy ns lockTTL nm
@@ -112,8 +113,8 @@ prop_blocklock_fail c = testProperty "short blocklock fails" $ property $ do
 
 ------------------------------------------------------------------------------
 prop_renewable_lock :: Connection -> TestTree
-prop_renewable_lock c = localOption (HedgehogTestLimit 25) $ testProperty "renewable lock works" $ property $ do
-  lockTime <- forAll (Gen.double (Range.linearFrac 0.01 2))
+prop_renewable_lock c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "renewable lock works" $ property $ do
+  lockTime <- forAll (Gen.double (Range.linearFrac 0.01 1))
   gotInitialLock <- liftIO $ runRedis c $ acquireLock ns lockTime nm
   when (not gotInitialLock) $ footnote "Failed to acquire initial lock"
   HH.assert gotInitialLock
@@ -260,3 +261,14 @@ prop_blocklock_exhaustion = testProperty "blockLock does not hold a connection t
 -------------------------------------------------------------------------------
 secondsInMicros :: Double -> Int
 secondsInMicros = round . (* 1e6)
+
+
+-------------------------------------------------------------------------------
+-- | If the current value is the default value, override with the
+-- given value, otherwise, respect the user's input
+unlessOverridden :: (IsOption v, Eq v) => v -> TestTree -> TestTree
+unlessOverridden overrideV = adjustOption go
+  where
+     go vGiven
+       | vGiven == defaultValue = overrideV
+       | otherwise              = vGiven
