@@ -56,14 +56,23 @@ tests c = testGroup "hedis-utils"
 
 -------------------------------------------------------------------------------
 prop_locking :: Connection -> TestTree
-prop_locking c = testProperty "locking works" $ property $ do
-  ns <- forAll (Gen.bytes (Range.linear 1 20))
-  nm <- forAll (Gen.bytes (Range.linear 1 20))
-  l <- liftIO $ runRedis c $ acquireLock ns 3 nm
-  l' <- liftIO $ runRedis c $ acquireLock ns 3 nm
-  liftIO $ runRedis c $ releaseLock ns nm
-  HH.assert $ l && not l'
-
+prop_locking c = testGroup "locking"
+  [ testProperty "works as expected" $ property $ do
+      ns <- forAll (Gen.bytes (Range.linear 1 20))
+      nm <- forAll (Gen.bytes (Range.linear 1 20))
+      l <- liftIO $ runRedis c $ acquireLock ns 3 nm
+      l' <- liftIO $ runRedis c $ acquireLock ns 3 nm
+      liftIO $ runRedis c $ releaseLock ns nm
+      HH.assert $ l && not l'
+  , testProperty "returns True even if the timeout is immediate or negative" $ property $ do
+      let ns = "locktest"
+      let nm = "lock_immediate_timeout"
+      tout <- forAll (Gen.double (Range.linearFrac (-100) 0))
+      locked <- liftIO $ runRedis c $ acquireLock ns tout nm
+      liftIO $ runRedis c $ releaseLock ns nm
+      footnote "Expected lock to acquire but it did not."
+      HH.assert locked
+  ]
 
 -------------------------------------------------------------------------------
 prop_lock_expire :: Connection -> TestTree
@@ -75,7 +84,7 @@ prop_lock_expire c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "loc
   liftIO $ threadDelay $ secondsInMicros waitFor
   l' <- liftIO $ runRedis c $ acquireLock ns lockLifespan nm
   liftIO $ runRedis c $ releaseLock ns nm
-  annotate "Expected second lock to succeed"
+  footnote "Expected second lock to succeed"
   HH.assert l'
   where
     ns = "locktest"

@@ -158,7 +158,7 @@ blockLock
     -> B.ByteString
     -- ^ namespace for this lock
     -> Double
-    -- ^ timeout in seconds.
+    -- ^ timeout in seconds. Negative or 0 timeouts will be padded to 1ms.
     -> B.ByteString
     -- ^ Name of item to lock.
     -> IO Bool
@@ -175,7 +175,7 @@ acquireLock
     :: B.ByteString
     -- ^ namespace for this lock
     -> Double
-    -- ^ timeout in seconds
+    -- ^ timeout in seconds. Negative or 0 timeouts will be padded to 1ms.
     -> B.ByteString
     -- ^ Name to lock
     -> Redis Bool
@@ -191,7 +191,7 @@ acquireLock lock to nm = do
       val = mempty
       opts = SetOpts
         { setSeconds = Nothing
-        , setMilliseconds = Just (doubleSecondsToMillis to)
+        , setMilliseconds = Just (doubleSecondsToMillis (max to 0.001))
         , setCondition = Just Nx -- set if not set
         }
       nm' = mkLockName lock nm
