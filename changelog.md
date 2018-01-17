@@ -1,3 +1,6 @@
+0.4.0.1
+* Round negative or 0 ttls for locks up to 1ms so they are actually acquired.
+
 0.4.0
 * Switch to native locking mechanism using SET with PX and NX
   options. This should provide better locking performance and avoids
