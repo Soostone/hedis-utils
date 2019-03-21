@@ -16,7 +16,7 @@ import           Control.Monad.Trans
 import           Control.Retry
 import qualified Data.ByteString.Char8    as B
 import           Data.IORef
-import           Data.Monoid
+import           Data.Semigroup           as Semigroup
 import           Data.Serialize           as S
 import           Data.Typeable
 import           Database.Redis
@@ -76,7 +76,7 @@ prop_locking c = testGroup "locking"
 
 -------------------------------------------------------------------------------
 prop_lock_expire :: Connection -> TestTree
-prop_lock_expire c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "locks expire eventually on their own when not released" $ property $ do
+prop_lock_expire c = unlessOverridden (HedgehogTestLimit (Just 25)) $ testProperty "locks expire eventually on their own when not released" $ property $ do
   lockLifespan <- forAll (Gen.double (Range.linearFrac 0.01 1))
   waitFor <- forAll (Gen.double (Range.linearFrac (lockLifespan + 0.1) 1))
   l <- liftIO $ runRedis c $ acquireLock ns lockLifespan nm
@@ -93,7 +93,7 @@ prop_lock_expire c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "loc
 
 -------------------------------------------------------------------------------
 prop_blocklock :: Connection -> TestTree
-prop_blocklock c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "blockLock eventually succeeds" $ property $ do
+prop_blocklock c = unlessOverridden (HedgehogTestLimit (Just 25)) $ testProperty "blockLock eventually succeeds" $ property $ do
   lockTTL <- forAll (Gen.double (Range.linearFrac 0.01 0.5))
   l <- liftIO $ blockLock c redisPolicy ns lockTTL nm
   l' <- liftIO $ blockLock c redisPolicy ns lockTTL nm
@@ -103,7 +103,7 @@ prop_blocklock c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "block
     ns = "locktest"
     nm = "blocklock"
     redisPolicy :: RetryPolicy
-    redisPolicy = capDelay 5000000 $ exponentialBackoff 25000 <> limitRetries 12
+    redisPolicy = capDelay 5000000 $ exponentialBackoff 25000 Semigroup.<> limitRetries 12
 
 
 -------------------------------------------------------------------------------
@@ -122,7 +122,7 @@ prop_blocklock_fail c = testProperty "short blocklock fails" $ property $ do
 
 ------------------------------------------------------------------------------
 prop_renewable_lock :: Connection -> TestTree
-prop_renewable_lock c = unlessOverridden (HedgehogTestLimit 25) $ testProperty "renewable lock works" $ property $ do
+prop_renewable_lock c = unlessOverridden (HedgehogTestLimit (Just 25)) $ testProperty "renewable lock works" $ property $ do
   lockTime <- forAll (Gen.double (Range.linearFrac 0.01 1))
   gotInitialLock <- liftIO $ runRedis c $ acquireLock ns lockTime nm
   when (not gotInitialLock) $ footnote "Failed to acquire initial lock"
@@ -202,11 +202,16 @@ prop_fifo :: Connection -> TestTree
 prop_fifo c = testProperty "push/pop FIFO" $ property $ do
     int <- forAll (Gen.int Range.linearBounded)
     str <- forAll (Gen.string (Range.linear 0  20) Gen.unicode)
-    [(a,b)] <- liftIO $ runRedis c $ do
+    popped <- liftIO $ runRedis c $ do
       pushFIFO "testing" (int,str)
       popFIFO "testing" 1
-    a === int
-    b === str
+    case popped of
+      [(a,b)] -> do
+        a === int
+        b === str
+      _ -> do
+        annotateShow popped
+        failure
 
 
 
@@ -233,11 +238,14 @@ prop_serialize_works = testProperty "serialize custom type works" $ property $ d
 prop_fifo_custom :: Connection -> TestTree
 prop_fifo_custom c = testProperty "push/pop FIFO custom type" $ property $ do
   td <- forAll genTestData
-  [n] <- liftIO $ runRedis c $ do
+  popped <- liftIO $ runRedis c $ do
     pushFIFO "testing_custom" td
     popFIFO "testing_custom" 1
-  n === td
-
+  case popped of
+    [n] -> n === td
+    _ -> do
+     annotateShow popped
+     failure
 
 -------------------------------------------------------------------------------
 prop_blocklock_exhaustion :: TestTree

@@ -45,7 +45,6 @@ import           Control.Monad.IO.Class
 import           Control.Retry
 import           Data.ByteString.Char8  (ByteString)
 import qualified Data.ByteString.Char8  as B
-import           Data.Default
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Serialize         as S
@@ -79,7 +78,9 @@ retryRedis mx msg c f = go `catch` handleEx
     handleEx e = error . concat $
            [ "Hedis: Retried ", show mx, " times but failed. Error: "
            , show e, ". Message: ", msg ]
-    go = recoverAll (def <> limitRetries mx) $ const $ runRedis c f
+    go = recoverAll policy $ const $ runRedis c f
+    policy = constantDelay 50000 <> limitRetries mx
+
 
 
 
