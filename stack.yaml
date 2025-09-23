@@ -1,9 +1,13 @@
-resolver: lts-13.13
+resolver: lts-24.12
 packages:
 - .
-extra-deps:
-  - tasty-hedgehog-0.2.0.0
-  - hedis-0.12.0
+- ./vendor/hedis-4b4e69e266b6aef7e3f768e94d5513edc3a6e9e1
+extra-deps: []
 flags:
   hedis-utils:
     lib-Werror: true
+
+nix:
+  enable: true
+  packages:
+    - zlib

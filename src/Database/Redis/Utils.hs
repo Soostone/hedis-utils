@@ -45,6 +45,7 @@ import           Control.Monad.IO.Class
 import           Control.Retry
 import           Data.ByteString.Char8  (ByteString)
 import qualified Data.ByteString.Char8  as B
+import           Data.List.NonEmpty     (NonEmpty ((:|)))
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Serialize         as S
@@ -194,6 +195,9 @@ acquireLock lock to nm = do
         { setSeconds = Nothing
         , setMilliseconds = Just (doubleSecondsToMillis (max to 0.001))
         , setCondition = Just Nx -- set if not set
+        , setUnixSeconds = Nothing
+        , setUnixMilliseconds = Nothing
+        , setKeepTTL = False
         }
       nm' = mkLockName lock nm
 
@@ -207,7 +211,7 @@ releaseLock
     -> B.ByteString
     -- ^ Name of item to release
     -> Redis ()
-releaseLock lock nm = unwrap (del [nm']) >> return ()
+releaseLock lock nm = unwrap (del (nm' :| [])) >> return ()
     where
       nm' = mkLockName lock nm
 
@@ -322,7 +326,7 @@ getTime = realToFrac `fmap` getPOSIXTime
 -- | Push item into a FIFO buffer
 pushFIFO :: (Serialize a) => ByteString -> a -> Redis ()
 pushFIFO k x = do
-  !_ <- unwrap $ lpush k [S.encode x]
+  !_ <- unwrap $ lpush k (S.encode x :| [])
   return ()
 
 

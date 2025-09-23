@@ -15,6 +15,7 @@ import           Control.Monad
 import           Control.Monad.Trans
 import           Control.Retry
 import qualified Data.ByteString.Char8    as B
+import           Data.List.NonEmpty (NonEmpty((:|)))
 import           Data.IORef
 import           Data.Semigroup           as Semigroup
 import           Data.Serialize           as S
@@ -193,7 +194,7 @@ prop_roundtrip :: Connection -> TestTree
 prop_roundtrip c = testProperty "simple BS roundtrip" $ property $ do
     x <- forAll (Gen.bytes (Range.linear 0 20))
     res <- liftIO $ runRedis c $ do
-      _ <- lpush "testing" [x]
+      _ <- lpush "testing" (x :| [])
       unwrap $ lpop "testing"
     res === Just x
 
