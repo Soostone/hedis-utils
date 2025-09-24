@@ -1,8 +1,8 @@
 resolver: lts-24.12
 packages:
 - .
+extra-deps:
 - ./vendor/hedis-4b4e69e266b6aef7e3f768e94d5513edc3a6e9e1
-extra-deps: []
 flags:
   hedis-utils:
     lib-Werror: true
